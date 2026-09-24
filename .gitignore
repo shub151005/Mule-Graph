@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+*.tsbuildinfo
+runtime/
+*.sqlite*
+*.joblib
+test-results/
+playwright-report/
+# Source datasets stay local; never add them to the application deployment.
+AMLSim/
+rest/
+rindaw_data/
+mule-graph-SHIBANKAR-data/

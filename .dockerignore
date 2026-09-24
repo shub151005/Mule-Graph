@@ -1,0 +1,5 @@
+*
+!backend/
+!backend/**
+backend/__pycache__/
+!Dockerfile
