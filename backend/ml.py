@@ -1,4 +1,5 @@
 """Reproducible temporal evaluation; source labels are evaluation targets only."""
+import io
 import json
 import uuid
 import joblib
@@ -7,7 +8,7 @@ from sklearn.ensemble import IsolationForest, RandomForestClassifier
 from sklearn.metrics import average_precision_score, precision_recall_fscore_support, confusion_matrix, precision_recall_curve
 from . import config
 from .analysis import load_transactions, causal_features, FEATURES
-from .db import connection, encode, now, audit
+from .db import connection, encode, now, audit, using_postgres
 
 def metrics(y, scores, threshold):
     pred=(scores>=threshold).astype(int)
@@ -63,20 +64,31 @@ def train(dataset_id, start, end, progress):
             validation=metrics(y[masks[1]],val_scores,best),test=metrics(y[masks[2]],test_scores,best),
             feature_importance=dict(zip(FEATURES,map(float,classifier.feature_importances_))))
     model_id=uuid.uuid4().hex[:16]
-    directory=config.DATA_DIR/'models';directory.mkdir(exist_ok=True)
-    joblib.dump({'isolation':iso,'classifier':classifier,'reference':np.sort(reference),'threshold':threshold,
-        'training_start':rows[0]['time'],'training_end':card['train_end'],'features':FEATURES},directory/f'{model_id}.joblib')
+    model_object={'isolation':iso,'classifier':classifier,'reference':np.sort(reference),'threshold':threshold,
+        'training_start':rows[0]['time'],'training_end':card['train_end'],'features':FEATURES}
+    payload=io.BytesIO();joblib.dump(model_object,payload);artifact=payload.getvalue()
+    # Local development keeps a convenient file copy. Cloud inference loads the
+    # authoritative artifact from PostgreSQL, so Render's filesystem is disposable.
+    if not using_postgres():
+        directory=config.DATA_DIR/'models';directory.mkdir(exist_ok=True)
+        joblib.dump(model_object,directory/f'{model_id}.joblib')
     with connection() as c:
-        c.execute('INSERT INTO models VALUES(?,?,?,?,?)',(model_id,dataset_id,now(),'isolation_forest+optional_random_forest',encode(card)))
+        c.execute('INSERT INTO models(id,dataset_id,created_at,kind,metadata,artifact) VALUES(?,?,?,?,?,?)',
+            (model_id,dataset_id,now(),'isolation_forest+optional_random_forest',encode(card),artifact))
         audit(c,'model.trained',model_id,{'dataset_id':dataset_id,'split_counts':card['split_counts']})
     return {'model_id':model_id,**card}
 
 def score_latest(dataset_id,rows):
     with connection() as c:
-        model=c.execute('SELECT * FROM models WHERE dataset_id=? ORDER BY created_at DESC LIMIT 1',(dataset_id,)).fetchone()
+        model=c.execute('SELECT id,dataset_id,created_at,kind,metadata,artifact FROM models WHERE dataset_id=? ORDER BY created_at DESC LIMIT 1',(dataset_id,)).fetchone()
     if not model:return [],'No trained model for this dataset. Train in Models first.'
-    # Load only locally generated, non-user-uploadable model files.
-    obj=joblib.load(config.DATA_DIR/'models'/f"{model['id']}.joblib")
+    if model['artifact']:
+        obj=joblib.load(io.BytesIO(bytes(model['artifact'])))
+    else:
+        # Compatibility for models trained before database-backed artifacts.
+        legacy=config.DATA_DIR/'models'/f"{model['id']}.joblib"
+        if not legacy.exists():return [],'The legacy model artifact is unavailable. Train the model again once.'
+        obj=joblib.load(legacy)
     # Recreate consistent causal history from the training observation start.
     _,history=load_transactions(dataset_id,obj['training_start'],rows[-1]['time'])
     scores=-obj['isolation'].score_samples(causal_features(history))

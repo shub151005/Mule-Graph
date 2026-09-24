@@ -3,14 +3,15 @@
 ```text
 React / TypeScript / Cytoscape (Vercel)
              | HTTPS / JSON / API key / configured CORS
-FastAPI API (single Uvicorn worker)
+FastAPI API (single Uvicorn worker; stateless on Render)
    |         |                 |
 Import job   Analysis job      Training job
    |         |                 |
 CSV adapters temporal rules    past-only features → ML → model card
    |         |                 |
-SQLite / WAL: transactions, isolated labels, runs, alerts, notes, audit
-Persistent local volume: SQLite and server-generated model artifacts
+Supabase PostgreSQL: transactions, labels, runs, alerts, notes, audit
+                       and server-generated model artifacts (BYTEA)
+Local development only: SQLite / WAL plus a disposable model-file copy
 ```
 
 ## Boundaries
@@ -18,7 +19,7 @@ Persistent local volume: SQLite and server-generated model artifacts
 - `ingest.py`: raw/prepared adapters and deterministic sandbox generator. Decimal validates amounts; original decimal strings are persisted. No currencies or clock times are inferred from missing fields.
 - `analysis.py`: bounded chronological rule engine and causal feature extraction. Equal-time rows do not see each other in their input features. Window units are seconds or simulation steps depending on source.
 - `ml.py`: deterministic training, temporal split, validation-only threshold selection, model persistence, post-training anomaly inference.
-- `db.py`: SQLite schema, transactions, helpers and audit events.
+- `db.py`: PostgreSQL/SQLite portability layer, schema creation, transactions, helpers and audit events. `DATABASE_URL` selects PostgreSQL; an unset value selects local SQLite.
 - `jobs.py`: serialized background jobs, progress, queue cap of three, crash recovery marking interrupted jobs. One Uvicorn worker is required.
 - `main.py`: constrained HTTP contracts, uploads, query endpoints, key authentication, CORS, evidence export with spreadsheet-formula protection.
 - `frontend/src`: live API client, page components, graph lifecycle, and responsive editorial design system.
@@ -35,4 +36,4 @@ Labels never enter the transactions table or feature vector. AMLSim account labe
 
 Imports stream to disk with indexed queries, but analysis and ML load a selected time window into memory. Default HTTP limits are 250k imported source rows, 100k analysis rows, 100 MB upload, 500 alerts, 300 graph edges, and 50 ML anomalies. Caps are explicit in the UI or response. Cycles are limited to 2–4 hops, 100 candidates per expansion and 200k expansions. Raising limits requires memory/load measurement, not merely changing a constant.
 
-For multi-tenant/large-scale operation: migrate persistence to PostgreSQL, job orchestration to a durable queue, graph windows to a streaming feature store, authentication to OIDC/RBAC, and artifacts to object storage. These are future infrastructure changes, not claimed implemented capabilities.
+The deployment database is PostgreSQL, but the free Supabase project remains capped and this release stores model artifacts in PostgreSQL to minimize moving parts. For multi-tenant/large-scale operation: move job orchestration to a durable queue, graph windows to a streaming feature store, authentication to OIDC/RBAC, and large model artifacts to object storage. These are future infrastructure changes, not claimed implemented capabilities.

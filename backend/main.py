@@ -17,10 +17,12 @@ from .db import connection, init_db, now, encode, audit, dataset_dict, alert_dic
 async def lifespan(app):
     if os.getenv('RENDER') and not config.API_KEY:
         raise RuntimeError('Set MULEGRAPH_API_KEY before exposing the API on Render.')
+    if os.getenv('RENDER') and not config.DATABASE_URL:
+        raise RuntimeError('Set DATABASE_URL to the Supabase Session pooler URL. Render Free local storage is not persistent.')
     init_db(recover_jobs=True)
     yield
 
-app=FastAPI(title='MuleGraph',version='1.0.0',lifespan=lifespan,description='Synthetic-data investigation research. No automated financial decisions.')
+app=FastAPI(title='MuleGraph',version='1.1.0',lifespan=lifespan,description='Synthetic-data investigation research. No automated financial decisions.')
 app.add_middleware(CORSMiddleware,allow_origins=config.CORS_ORIGINS,allow_methods=['GET','POST','PATCH','OPTIONS'],allow_headers=['Content-Type','X-API-Key'])
 
 def authenticated(x_api_key: str=Header(default='')):
@@ -29,7 +31,7 @@ def authenticated(x_api_key: str=Header(default='')):
 api=APIRouter(prefix='/api',dependencies=[Depends(authenticated)])
 
 @app.get('/health')
-def health():return {'status':'ok','service':'MuleGraph','version':'1.0.0'}
+def health():return {'status':'ok','service':'MuleGraph','version':'1.1.0','persistence':'postgresql' if config.DATABASE_URL else 'sqlite-local'}
 
 @api.get('/datasets')
 def datasets():
@@ -193,7 +195,7 @@ def train(body:TrainRequest):return enqueue('training',lambda p:ml.train(body.da
 
 @api.get('/models')
 def models(dataset_id:str):
-    with connection() as c:return [{**dict(r),'metadata':json.loads(r['metadata'])} for r in c.execute('SELECT * FROM models WHERE dataset_id=? ORDER BY created_at DESC',(dataset_id,))]
+    with connection() as c:return [{**dict(r),'metadata':json.loads(r['metadata'])} for r in c.execute('SELECT id,dataset_id,created_at,kind,metadata FROM models WHERE dataset_id=? ORDER BY created_at DESC',(dataset_id,))]
 
 @api.get('/audit')
 def audit_log():

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from backend import config,ingest,analysis,ml
-from backend.db import connection
+from backend.db import CompatRow,connection,_postgres_sql,_postgres_row
 from backend.main import app
 
 def tx(i,s='A',r='B',t=0,amount='100',currency='USD',received='100',rcurrency='USD',device=''):
@@ -112,6 +112,13 @@ def test_api_auth_validation_and_error_states(monkeypatch):
         assert client.post('/api/analysis',headers={'X-API-Key':'secret'},json={'dataset_id':'x','window':-1}).status_code==422
         assert client.get('/api/alerts/missing',headers={'X-API-Key':'secret'}).status_code==404
 
+def test_render_refuses_ephemeral_database(monkeypatch):
+    monkeypatch.setenv('RENDER','true')
+    monkeypatch.setattr(config,'API_KEY','secret')
+    monkeypatch.setattr(config,'DATABASE_URL','')
+    with pytest.raises(RuntimeError,match='DATABASE_URL'):
+        with TestClient(app):pass
+
 def test_end_to_end_demo_model_and_persistence():
     res=ingest.demo();did=res['dataset_id']
     result=analysis.analyze(did,{'window':900},lambda *_:None)
@@ -122,11 +129,19 @@ def test_end_to_end_demo_model_and_persistence():
     assert model['split_counts']['train']>0
     assert model['supervised_status'].startswith('Trained')
     assert model['test']['rows']>0
-    assert (config.DATA_DIR/'models'/f"{model['model_id']}.joblib").exists()
+    model_path=config.DATA_DIR/'models'/f"{model['model_id']}.joblib"
+    assert model_path.exists()
+    with connection() as c:
+        artifact=c.execute('SELECT artifact FROM models WHERE id=?',(model['model_id'],)).fetchone()[0]
+    assert len(artifact)>1000
+    # Inference must survive the loss of Render's local filesystem.
+    model_path.unlink()
     ds,rows=analysis.load_transactions(did)
     scored,status=ml.score_latest(did,rows)
     assert all(r['time']>model['train_end'] for r,s in scored)
     with TestClient(app) as client:
+        model_listing=client.get('/api/models',params={'dataset_id':did}).json()
+        assert model_listing and 'artifact' not in model_listing[0]
         listing=client.get('/api/alerts',params={'dataset_id':did}).json();aid=listing['items'][0]['id']
         detail=client.get('/api/alerts/'+aid).json();assert detail['transactions']
         response=client.patch('/api/alerts/'+aid,json={'status':'Reviewing','note':'Check source history'}).json()
@@ -162,3 +177,16 @@ def test_threshold_selection_uses_exact_validation_tail():
     threshold=ml.validation_threshold(y,scores)
     assert threshold==scores[998]
     assert ml.metrics(y,scores,threshold)['recall']==1
+
+def test_postgres_parameter_translation():
+    assert _postgres_sql('SELECT * FROM alerts WHERE id=? AND status=?') == \
+        'SELECT * FROM alerts WHERE id=%s AND status=%s'
+
+def test_postgres_rows_match_sqlite_access_contract():
+    class Column:
+        def __init__(self,name):self.name=name
+    class Cursor:
+        description=[Column('count'),Column('status')]
+    row=_postgres_row(Cursor())((3,'ready'))
+    assert isinstance(row,CompatRow)
+    assert row[0]==3 and row['status']=='ready' and dict(row)=={'count':3,'status':'ready'}

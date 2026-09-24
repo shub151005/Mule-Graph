@@ -2,21 +2,21 @@ services:
   - type: web
     name: mulegraph-api
     runtime: docker
-    plan: starter
+    plan: free
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
-    disk:
-      name: mulegraph-data
-      mountPath: /app/runtime
-      sizeGB: 1
     envVars:
       - key: MULEGRAPH_API_KEY
         generateValue: true
       - key: CORS_ORIGINS
         sync: false
+      - key: DATABASE_URL
+        sync: false
       - key: MAX_ANALYSIS_ROWS
         value: "100000"
       - key: MAX_IMPORT_ROWS
         value: "250000"
+      - key: MAX_UPLOAD_BYTES
+        value: "104857600"
       - key: MULEGRAPH_DATA_DIR
         value: /app/runtime

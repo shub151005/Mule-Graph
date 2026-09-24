@@ -9,5 +9,6 @@ from backend.db import init_db
 def isolated_database(tmp_path,monkeypatch):
     monkeypatch.setattr(config,'DATA_DIR',tmp_path)
     monkeypatch.setattr(config,'DB_PATH',tmp_path/'test.sqlite3')
+    monkeypatch.setattr(config,'DATABASE_URL','')
     monkeypatch.setattr(config,'API_KEY','')
     init_db()

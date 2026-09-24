@@ -1,34 +1,103 @@
 # Deployment
 
-## Recommended: Render API + Vercel frontend
+## Free-tier production-shaped deployment
 
-Render is the primary target because this implementation expects a persistent POSIX disk for SQLite and saved models. `render.yaml` requests a paid Starter web service and a 1 GB persistent disk; review current charges and size before applying. **No paid service or public deployment has been created by this build.**
+MuleGraph uses three services:
 
-1. Push application files to your chosen Git remote only after reviewing the existing tracked datasets. Some source files were committed before this build; `.gitignore` does not remove them from history. Avoid uploading multi-gigabyte data by accident. Prefer a clean app-only deployment repository if necessary.
-2. Create a Render Blueprint from `render.yaml` or a Docker web service manually. Attach the persistent disk at `/app/runtime`.
-3. Set `MULEGRAPH_API_KEY` to a strong random secret and `CORS_ORIGINS` to the exact frontend origin (for example `https://your-app.vercel.app`). Never use `*` for a protected workspace.
-4. Deploy. `/health` should return OK. Keep one Uvicorn worker; job recovery and SQLite are designed around this process model.
-5. In Vercel, choose `frontend` as the root directory. Framework: Vite. Build: `npm run build`. Output: `dist`. Set `VITE_API_URL=https://your-api.onrender.com` before building.
-6. Open the frontend connection dialog and enter the API key. Do not create `VITE_API_KEY`: frontend environment variables are public build content.
-7. Upload a prepared subset or create the illustrative sandbox. Local source folders intentionally are not copied into the image. For labeled data, use the CLI on the server with separately supplied files, or upload supported raw CSV with its original label column.
-8. Test import → analysis → alert → note → export, then restart the API and verify persistence.
+1. **Supabase Free PostgreSQL** stores datasets, transactions, investigations, notes, audit records, job history, and trained model artifacts.
+2. **Render Free Web Service** runs the stateless FastAPI/Docker backend.
+3. **Vercel Free** builds and serves the React/Vite frontend.
 
-Official references: [Render FastAPI](https://render.com/docs/deploy-fastapi), [Render disks](https://render.com/docs/disks), [Vite on Vercel](https://vercel.com/docs/frameworks/frontend/vite).
+Render's filesystem is intentionally non-authoritative. Restarting, redeploying, or idling the Render service does not remove application records or trained models because those live in PostgreSQL. Temporary uploaded files are deleted after parsing and may safely disappear.
 
-## Hugging Face alternative
+### 1. Create Supabase persistence
 
-The root README has Docker Space metadata (`sdk: docker`, `app_port: 7860`). Copy the app-only repository into a Docker Space. Docker listens on port 7860 by default. Set the same API key and CORS settings as above. The frontend remains separately deployed on Vercel; the Space exposes the API, not the React application.
+1. Create a free Supabase project and retain its database password.
+2. In the project dashboard, click **Connect**.
+3. Select **Session pooler** (port 5432), because it works over IPv4 and supports a persistent container backend.
+4. Copy the full URI and replace the password placeholder. Percent-encode reserved password characters if necessary.
+5. Keep this URI secret. It becomes Render's `DATABASE_URL`; never put it in Vercel or Git.
 
-Default container storage is ephemeral. Treat this option as a demo unless you configure storage and verify restart behavior. A bucket is not automatically equivalent to a POSIX disk suitable for a live SQLite database: do not point SQLite at an object-storage URL. Use explicit backup/restore or adapt to an external relational database before relying on it for durable investigations. Review current Space eligibility, hardware and storage pricing; no assumption of free compute is made.
+No manual schema SQL is required. On startup, MuleGraph creates or upgrades its tables transactionally.
 
-Official reference: [Docker Spaces](https://huggingface.co/docs/hub/spaces-sdks-docker).
+### 2. Create the Render backend manually
 
-## Security and operations
+Do not use a Blueprint for the first deployment.
 
-- Synthetic/research data only until authentication, access control, retention, encryption, legal review and operational procedures are completed.
-- The API key is a single shared workspace credential, not individual user authentication. Notes are not signed by a verified analyst identity.
-- API docs and health are public; application data routes require the key when configured. TLS is provided by the hosting platform.
-- Keep dependencies locked after verification. Models are generated locally; never accept uploaded pickle/joblib files.
-- Job submission is bounded but not distributed rate limiting. Use host-level request limits and trusted access.
-- Back up the persistent volume regularly. Audit logs are not tamper-resistant.
-- Fonts load from Google Fonts with local fallbacks; remove external font requests for a privacy-constrained deployment.
+1. Choose **New → Web Service** and connect the GitHub repository.
+2. Branch: `main`.
+3. Runtime: **Docker**.
+4. Root directory: blank.
+5. Dockerfile path: `./Dockerfile`.
+6. Instance type: **Free**.
+7. Do not add a disk.
+8. Health check path: `/health`.
+9. Keep one worker; the Dockerfile already supplies the correct start command.
+10. Add these environment variables:
+
+   - `DATABASE_URL`: Supabase Session pooler URI
+   - `MULEGRAPH_API_KEY`: a generated private random value
+   - `CORS_ORIGINS`: initially `http://localhost:5173,http://127.0.0.1:5173`
+   - `MULEGRAPH_DATA_DIR`: `/app/runtime`
+   - `MAX_IMPORT_ROWS`: `250000`
+   - `MAX_ANALYSIS_ROWS`: `100000`
+   - `MAX_UPLOAD_BYTES`: `104857600`
+
+Deploy and open `https://YOUR-SERVICE.onrender.com/health`. A correct deployment reports:
+
+```json
+{"status":"ok","service":"MuleGraph","version":"1.1.0","persistence":"postgresql"}
+```
+
+The backend deliberately refuses to start on Render if either `MULEGRAPH_API_KEY` or `DATABASE_URL` is absent. This prevents an accidentally public or ephemeral deployment.
+
+### 3. Create the Vercel frontend
+
+1. Import the same GitHub repository.
+2. Root directory: `frontend`.
+3. Framework preset: **Vite**.
+4. Build command: `npm run build`.
+5. Output directory: `dist`.
+6. Add `VITE_API_URL=https://YOUR-SERVICE.onrender.com` with no trailing slash.
+7. Do not define a Vite API-key variable; Vite variables are public browser content.
+8. Deploy and copy the production Vercel origin.
+
+### 4. Lock CORS to the frontend
+
+Return to Render and set:
+
+```text
+CORS_ORIGINS=https://YOUR-PROJECT.vercel.app,http://localhost:5173,http://127.0.0.1:5173
+```
+
+Use exact origins with no trailing slash and do not use `*`. Save and redeploy.
+
+### 5. Verify persistence
+
+1. Open the frontend connection dialog and enter the same `MULEGRAPH_API_KEY`.
+2. Create the Illustrative Sandbox.
+3. Run analysis, train a model, update an alert status, and add a note.
+4. Trigger a normal Render redeploy.
+5. Reopen the frontend and confirm that the dataset, model, alert update, note, and audit entry remain.
+
+This verification proves the application is using Supabase rather than Render's local filesystem.
+
+## Local behavior
+
+When `DATABASE_URL` is unset, MuleGraph continues to use the local SQLite database under `MULEGRAPH_DATA_DIR`. This keeps local development simple and isolated. Never set a production `DATABASE_URL` in a committed file.
+
+## Free-tier boundaries
+
+- Supabase Free currently limits database size. Keep demonstration imports bounded and remove unused datasets before approaching the quota.
+- Render Free can sleep when idle, causing a cold-start delay, but PostgreSQL records survive.
+- Supabase Free can pause after prolonged project inactivity; restore the project from its dashboard before a demonstration.
+- The API has one in-process job worker. A backend restart marks an active job interrupted, but previously completed datasets, alerts, notes, audit entries, and models remain.
+- This remains synthetic/research software, not a certified AML platform.
+
+## Security
+
+- Keep `DATABASE_URL` and `MULEGRAPH_API_KEY` only in Render's secret environment.
+- Never use the database password, connection URI, or API key in a `VITE_*` variable.
+- The shared API key is workspace-level protection, not per-user identity or RBAC.
+- Models are generated by MuleGraph and serialized into PostgreSQL; uploaded pickle/joblib artifacts are never accepted.
+- TLS is provided by Supabase, Render, and Vercel. Use the Supabase URI supplied by the dashboard.

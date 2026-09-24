@@ -68,17 +68,17 @@ npm.cmd run dev
 
 The optional `.\.venv\Scripts\python.exe -m backend.cli demo` command imports deterministic, explicitly illustrative scenarios and runs the rules; it does not start a server or fabricate performance on IBM/SAML/AMLSim. Skip it to start empty and import actual source files from **Datasets & analysis**.
 
-Use `.env` for real configuration and start Uvicorn with `--env-file .env`; do not put production secrets in `.env.example`. `MULEGRAPH_DATA_DIR` holds the database, generated models, and temporary upload files. The UI access key is stored only in sessionStorage, never compiled into the frontend.
+Use `.env` for real configuration and start Uvicorn with `--env-file .env`; do not put production secrets in `.env.example`. With no `DATABASE_URL`, local development uses SQLite in `MULEGRAPH_DATA_DIR`. Deployment uses Supabase PostgreSQL for transactions, investigations, audit history, and serialized model artifacts; the Render filesystem is used only for disposable upload staging. The UI access key is stored only in sessionStorage, never compiled into the frontend.
 
 ## Included
 
-- FastAPI + indexed SQLite/WAL, one bounded background worker, persistent job/run history.
+- FastAPI + indexed PostgreSQL in deployment and SQLite/WAL locally, one bounded background worker, persistent job/run history.
 - Streaming adapters for prepared CSV/CSV.GZ, IBM raw (including duplicate Account column names), SAML raw, and AMLSim raw.
 - Source-row provenance, preserved exact monetary strings, currencies, timestamps/steps, validation summaries, rejected-row examples, and separate label storage.
 - Fan-in/out, rapid pass-through, bursts, bounded temporal cycles, observed dormancy, optional shared-device clusters.
 - Isolation Forest and optional class-balanced Random Forest with chronological train/validation/test splits, past-only features, threshold selection on validation, PR-AUC/precision/recall/F1 and confusion matrix.
 - React + TypeScript + Cytoscape: overview, filtered alerts, directed graph, playback, account dossiers, transaction paging, data setup, model cards, notes, review status, CSV/JSON evidence, audit history.
-- Render Docker/persistent-disk configuration, Hugging Face Docker support, and Vercel frontend configuration.
+- Free-tier Render stateless Docker API, Supabase PostgreSQL persistence, and Vercel frontend configuration.
 
 ## Source datasets
 

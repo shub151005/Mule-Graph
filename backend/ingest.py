@@ -66,8 +66,16 @@ def import_csv(path, name, limit, progress=lambda *_:None, label_path=None, sour
     did=uuid.uuid4().hex[:16]
     accounts=set(); ids=set(); currencies=Counter(); missing=Counter(); rejects=[]
     low=float('inf'); high=-float('inf'); kinds=set(); accepted=0; rejected=0; seen=0; truncated=False
+    tx_batch=[];label_batch=[]
     progress(5,'Reading and validating transaction records')
     with connection() as c:
+        def flush():
+            if tx_batch:
+                c.executemany('INSERT INTO transactions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',tx_batch)
+                tx_batch.clear()
+            if label_batch:
+                c.executemany('INSERT INTO labels VALUES(?,?,?,?,?)',label_batch)
+                label_batch.clear()
         c.execute('INSERT INTO datasets VALUES(?,?,?,?,?,?,?,?,?,?)',(did,name,source,now(),0,0,'',None,None,'{}'))
         with text_open(path) as stream:
             reader=csv.reader(stream); header=next(reader,None)
@@ -85,13 +93,15 @@ def import_csv(path, name, limit, progress=lambda *_:None, label_path=None, sour
                     kinds.add(kind); ids.add(tx[1]); accounts.update(tx[2:4]); currencies[tx[7] or 'Unspecified']+=1
                     for i,field in [(7,'currency'),(8,'amount_received'),(12,'device_id')]: missing[field]+=int(tx[i]=='')
                     low=min(low,tx[4]); high=max(high,tx[4])
-                    c.execute('INSERT INTO transactions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',tx); accepted+=1
+                    tx_batch.append(tx);accepted+=1
                     if label in ('0','1'):
-                        c.execute('INSERT INTO labels VALUES(?,?,?,?,?)',(did,'transaction',tx[1],int(label),typology))
+                        label_batch.append((did,'transaction',tx[1],int(label),typology))
+                    if len(tx_batch)>=1000:flush()
                 except (ValueError,InvalidOperation,OverflowError) as exc:
                     rejected+=1
                     if len(rejects)<100: rejects.append({'source_row':n,'reason':str(exc)})
         if not accepted: raise ValueError('No valid transaction rows. '+str(rejects[:3]))
+        flush()
         # Sidecar streaming is intentionally separate from detection input.
         if label_path and Path(label_path).exists():
             with text_open(label_path) as stream:
@@ -99,7 +109,9 @@ def import_csv(path, name, limit, progress=lambda *_:None, label_path=None, sour
                     etype,eid=row.get('entity_type'),row.get('entity_id')
                     if (etype=='transaction' and eid not in ids) or (etype=='account' and eid not in accounts): continue
                     if row.get('label_name') in ('Is Laundering','Is_laundering','isFraud') and row['label_value'] in ('0','1'):
-                        c.execute('INSERT OR REPLACE INTO labels VALUES(?,?,?,?,?)',(did,etype,eid,int(row['label_value']),''))
+                        c.execute('''INSERT INTO labels(dataset_id,entity_type,entity_id,label,typology) VALUES(?,?,?,?,?)
+                            ON CONFLICT(dataset_id,entity_type,entity_id)
+                            DO UPDATE SET label=excluded.label,typology=excluded.typology''',(did,etype,eid,int(row['label_value']),''))
                     elif row.get('label_name')=='Laundering_type':
                         c.execute('UPDATE labels SET typology=? WHERE dataset_id=? AND entity_type=? AND entity_id=?',(row['label_value'],did,etype,eid))
         labeled=c.execute('SELECT count(*) FROM labels WHERE dataset_id=?',(did,)).fetchone()[0]

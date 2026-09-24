@@ -4,7 +4,7 @@ The scope is organized as vertical increments with explicit acceptance gates. Re
 
 | Increment | Scope | Acceptance gate |
 | --- | --- | --- |
-| 1. Data foundation | Adapters, SQLite, validation, provenance, jobs, API | Import all three schema families without inventing missing values |
+| 1. Data foundation | Adapters, PostgreSQL/SQLite portability, validation, provenance, jobs, API | Import all three schema families without inventing missing values |
 | 2. Intelligence | Seven conditional rules, anomaly ML, supervised baseline, evaluation | Evidence references real rows; labels excluded from features; temporal holdout |
 | 3. Investigation UX | Six connected pages, graph, filters, dossiers, notes, exports | An analyst can go from dataset to alert to documented evidence |
 | 4. Delivery hardening | Automated tests, responsive checks, reproducible build, deployment docs | Tests/build pass; limits and remaining deployment requirements documented |
