@@ -15,7 +15,13 @@ class CompatRow(dict):
 
 
 def _postgres_row(cursor):
-    columns = [column.name for column in cursor.description]
+    description = cursor.description
+    if description is None:
+        # Psycopg invokes the factory for commands such as CREATE/UPDATE too.
+        # Match psycopg.rows.dict_row's no-result behavior for those commands.
+        from psycopg.rows import no_result
+        return no_result
+    columns = [column.name for column in description]
 
     def make_row(values):
         return CompatRow(zip(columns, values))

@@ -190,3 +190,8 @@ def test_postgres_rows_match_sqlite_access_contract():
     row=_postgres_row(Cursor())((3,'ready'))
     assert isinstance(row,CompatRow)
     assert row[0]==3 and row['status']=='ready' and dict(row)=={'count':3,'status':'ready'}
+
+def test_postgres_row_factory_accepts_commands_without_results():
+    class Cursor:
+        description=None
+    assert callable(_postgres_row(Cursor()))
