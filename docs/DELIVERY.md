@@ -21,3 +21,7 @@ No decorative nonfunctional controls, no fabricated statistics, validated API in
 4. Run regression tests and recheck the complete investigation flow before release.
 
 Deferred infrastructure is listed in ARCHITECTURE.md. Missing source evidence is listed in LIMITATIONS.md; it is never silently replaced with invented data.
+
+## Dataset Preparation Acknowledgement
+
+The IBM HI-Small preparation workflow was independently reviewed by Shibankar as part of the team's dataset validation and integration process.
